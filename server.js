@@ -13,6 +13,8 @@ app.use(express.json());
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/payments', require('./routes/payments'));
 app.use('/api/loans', require('./routes/loans'));
+app.use('/api/amounts', require('./routes/amount'));
+app.use('/api/interest-rates', require('./routes/interestRateRoutes'));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

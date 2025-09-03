@@ -28,7 +28,7 @@ exports.login = async (req, res) => {
       return res.status(403).json({ msg: 'Account not approved' });
     }
     const payload = { user: { id: user.id, role: user.role } };
-    jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' }, (err, token) => {
+    jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '24h' }, (err, token) => {
       if (err) throw err;
       res.json({ token });
     });
