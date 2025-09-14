@@ -20,34 +20,13 @@ exports.requestLoan = async (req, res) => {
       console.log(`Request Loan: Access denied for user role ${req.user.role}`);
       return res.status(403).json({ msg: 'Staff access required' });
     }
-    if (!amount || !reason || !interestRate || !duration) {
-      return res.status(400).json({ msg: 'Amount, reason, interest rate, and duration are required' });
+    if (!amount || !reason) {
+      return res.status(400).json({ msg: 'Amount and reason are required' });
     }
-    if (typeof amount !== 'number' || typeof interestRate !== 'number' || typeof duration !== 'number' || 
-        amount <= 0 || interestRate <= 0 || duration <= 0) {
-      return res.status(400).json({ msg: 'Amount, interest rate, and duration must be positive numbers' });
-    }
-
-    // Calculate EMI and total amount payable
-    const emiAmount = calculateEMI(amount, interestRate, duration);
-    const totalAmountPayable = emiAmount * duration;
-
-    // Initialize payment schedule
-    const payments = Array.from({ length: duration }, (_, i) => ({
-      amount: emiAmount,
-      date: new Date(new Date().setMonth(new Date().getMonth() + i + 1)),
-      status: 'pending',
-    }));
-
     const loan = new Loan({
       user: req.user.id,
       amount,
       reason,
-      interestRate,
-      duration,
-      totalAmountPayable,
-      emiAmount,
-      payments,
     });
 
     await loan.save();
@@ -63,36 +42,25 @@ exports.requestLoan = async (req, res) => {
 exports.updateLoan = async (req, res) => {
   let { status, interestRate, duration } = req.body;
   try {
-    // Validate user authentication
     if (!req.user) {
       console.error('Update Loan: req.user is undefined');
       return res.status(401).json({ msg: 'Not authorized, user not found' });
     }
-
-    // Restrict to admin role
     if (req.user.role !== 'admin') {
       console.log(`Update Loan: Access denied for user role ${req.user.role}`);
       return res.status(403).json({ msg: 'Admin access required' });
     }
-
-    // Log request body for debugging
     console.log('Update Loan Request Body:', { status, interestRate, duration });
-
-    // Handle case where status is an object
     if (typeof status === 'object' && status !== null && typeof status.status === 'string') {
       interestRate = status.interestRate || interestRate;
       duration = status.duration || duration;
       status = status.status;
       console.log('Extracted status from object:', { status, interestRate, duration });
     }
-
-    // Validate status
     if (typeof status !== 'string' || !status.trim()) {
       console.log('Invalid status type or empty:', status);
       return res.status(400).json({ msg: 'Status must be a non-empty string' });
     }
-
-    // Normalize and validate status
     const normalizedStatus = status.toLowerCase().trim();
     if (!['approved', 'rejected', 'pending'].includes(normalizedStatus)) {
       console.log('Invalid status value:', status);
@@ -100,18 +68,12 @@ exports.updateLoan = async (req, res) => {
         msg: 'Invalid status. Must be "approved", "rejected", or "pending"' 
       });
     }
-
-    // Find the loan
     const loan = await Loan.findById(req.params.id);
     if (!loan) {
       console.log(`Loan not found for ID: ${req.params.id}`);
       return res.status(404).json({ msg: 'Loan not found' });
     }
-
-    // Update status
     loan.status = normalizedStatus;
-
-    // Update interest rate and duration if provided
     if (interestRate && duration) {
       if (typeof interestRate !== 'number' || typeof duration !== 'number' || 
           interestRate <= 0 || duration <= 0) {
@@ -134,12 +96,8 @@ exports.updateLoan = async (req, res) => {
         totalAmountPayable: loan.totalAmountPayable 
       });
     }
-
-    // Save the loan
     await loan.save();
     console.log(`Loan ${normalizedStatus}:`, loan);
-
-    // Return detailed response
     res.json({
       msg: `Loan ${normalizedStatus} successfully`,
       loan: {
@@ -194,7 +152,6 @@ exports.getLoans = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
-
     const loans = await Loan.find(query)
       .populate('user', 'name')
       .skip(skip)
@@ -224,11 +181,8 @@ exports.getLoanDetails = async (req, res) => {
       console.log(`Get Loan Details: Access denied for user ${req.user.id}`);
       return res.status(403).json({ msg: 'Access denied' });
     }
-
-    // Calculate paid and pending EMIs
     const paidEMIs = loan.payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0);
     const pendingEMIs = loan.payments.filter(p => p.status === 'pending').length;
-
     console.log('Fetched loan details:', loan);
     res.json({
       loan,
@@ -237,6 +191,54 @@ exports.getLoanDetails = async (req, res) => {
     });
   } catch (err) {
     console.error('Get Loan Details Error:', err.stack);
+    res.status(500).json({ msg: 'Server error', error: err.message });
+  }
+};
+
+// Update EMI payment status (admin only)
+exports.updatePaymentStatus = async (req, res) => {
+  const { status } = req.body;
+  const { id, paymentIndex } = req.params;
+  try {
+    if (!req.user) {
+      console.error('Update Payment Status: req.user is undefined');
+      return res.status(401).json({ msg: 'Not authorized, user not found' });
+    }
+    if (req.user.role !== 'admin') {
+      console.log(`Update Payment Status: Access denied for user role ${req.user.role}`);
+      return res.status(403).json({ msg: 'Admin access required' });
+    }
+    if (typeof status !== 'string' || !status.trim()) {
+      console.log('Invalid status type or empty:', status);
+      return res.status(400).json({ msg: 'Status must be a non-empty string' });
+    }
+    const normalizedStatus = status.toLowerCase().trim();
+    if (!['paid', 'pending'].includes(normalizedStatus)) {
+      console.log('Invalid payment status value:', status);
+      return res.status(400).json({ msg: 'Invalid status. Must be "paid" or "pending"' });
+    }
+    const loan = await Loan.findById(id).populate('user', 'name');
+    if (!loan) {
+      console.log(`Loan not found for ID: ${id}`);
+      return res.status(404).json({ msg: 'Loan not found' });
+    }
+    if (paymentIndex < 0 || paymentIndex >= loan.payments.length) {
+      console.log(`Invalid payment index: ${paymentIndex}, loan payments length: ${loan.payments.length}`);
+      return res.status(400).json({ msg: 'Invalid payment index' });
+    }
+    loan.payments[paymentIndex].status = normalizedStatus;
+    await loan.save();
+    const paidEMIs = loan.payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0);
+    const pendingEMIs = loan.payments.filter(p => p.status === 'pending').length;
+    console.log(`Updated payment status for loan ${id}, payment ${paymentIndex}: ${normalizedStatus}`);
+    res.json({
+      msg: `Payment status updated to ${normalizedStatus}`,
+      loan,
+      paidEMIs,
+      pendingEMIs,
+    });
+  } catch (err) {
+    console.error('Update Payment Status Error:', err.stack);
     res.status(500).json({ msg: 'Server error', error: err.message });
   }
 };
