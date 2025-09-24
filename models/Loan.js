@@ -11,7 +11,7 @@ const loanSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   amount: { type: Number, required: true },
   reason: { type: String, required: true },
-  status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+  status: { type: String, enum: ['pending', 'approved', 'rejected','completed'], default: 'pending' },
   date: { type: Date, default: Date.now },
   interestRate: { type: Number, required: false }, // Annual interest rate (e.g., 5 for 5%)
   duration: { type: Number, required: false }, // Duration in months

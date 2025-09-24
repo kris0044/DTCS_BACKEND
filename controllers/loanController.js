@@ -1,4 +1,5 @@
 const Loan = require('../models/Loan');
+const Balance = require('../models/BalanceEntry');
 
 // Calculate EMI using the formula: EMI = [P * R * (1+R)^N] / [(1+R)^N - 1]
 const calculateEMI = (principal, annualInterestRate, durationInMonths) => {
@@ -62,10 +63,10 @@ exports.updateLoan = async (req, res) => {
       return res.status(400).json({ msg: 'Status must be a non-empty string' });
     }
     const normalizedStatus = status.toLowerCase().trim();
-    if (!['approved', 'rejected', 'pending'].includes(normalizedStatus)) {
+    if (!['approved', 'rejected', 'pending','completed'].includes(normalizedStatus)) {
       console.log('Invalid status value:', status);
       return res.status(400).json({ 
-        msg: 'Invalid status. Must be "approved", "rejected", or "pending"' 
+        msg: 'Invalid status. Must be "approved", "rejected", or "pending","completed' 
       });
     }
     const loan = await Loan.findById(req.params.id);
@@ -74,7 +75,8 @@ exports.updateLoan = async (req, res) => {
       return res.status(404).json({ msg: 'Loan not found' });
     }
     loan.status = normalizedStatus;
-    if (interestRate && duration) {
+
+    if (normalizedStatus === 'approved' && interestRate && duration) {
       if (typeof interestRate !== 'number' || typeof duration !== 'number' || 
           interestRate <= 0 || duration <= 0) {
         console.log('Invalid interestRate or duration:', { interestRate, duration });
@@ -91,12 +93,24 @@ exports.updateLoan = async (req, res) => {
         date: new Date(new Date().setMonth(new Date().getMonth() + i + 1)),
         status: 'pending',
       }));
+      
+      // Deduct loan amount from balance when approved
+      const balanceEntry = new Balance({
+        amount: -loan.amount,
+        note: `Loan approved for user ${loan.user} (Loan ID: ${loan._id})`
+      });
+      await balanceEntry.save();
+      console.log('Balance updated for loan approval:', balanceEntry);
+
       console.log('Updated EMI and payment schedule:', { 
         emiAmount: loan.emiAmount, 
         totalAmountPayable: loan.totalAmountPayable 
       });
     }
     await loan.save();
+    const totalBalance = await Balance.find().then(entries => 
+      entries.reduce((sum, entry) => sum + entry.amount, 0)
+    );
     console.log(`Loan ${normalizedStatus}:`, loan);
     res.json({
       msg: `Loan ${normalizedStatus} successfully`,
@@ -110,6 +124,7 @@ exports.updateLoan = async (req, res) => {
         totalAmountPayable: loan.totalAmountPayable,
         emiAmount: loan.emiAmount,
       },
+      totalBalance
     });
   } catch (err) {
     console.error('Update Loan Error:', err.stack);
@@ -226,16 +241,37 @@ exports.updatePaymentStatus = async (req, res) => {
       console.log(`Invalid payment index: ${paymentIndex}, loan payments length: ${loan.payments.length}`);
       return res.status(400).json({ msg: 'Invalid payment index' });
     }
+    if (normalizedStatus === 'paid' && loan.payments[paymentIndex].status !== 'paid') {
+      // Add EMI amount to balance when payment is marked as paid
+      const balanceEntry = new Balance({
+        amount: loan.payments[paymentIndex].amount,
+        note: `EMI payment for Loan ID: ${loan._id}, Payment ${parseInt(paymentIndex) + 1}`
+      });
+      await balanceEntry.save();
+      console.log('Balance updated for EMI payment:', balanceEntry);
+    }
     loan.payments[paymentIndex].status = normalizedStatus;
+
+    // Check if all payments are paid and update loan status to 'completed' if true
+    const allPaymentsPaid = loan.payments.every(payment => payment.status === 'paid');
+    if (allPaymentsPaid && loan.status !== 'completed') {
+      loan.status = 'completed';
+      console.log(`Loan ${id} status updated to completed as all EMIs are paid`);
+    }
+
     await loan.save();
     const paidEMIs = loan.payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0);
     const pendingEMIs = loan.payments.filter(p => p.status === 'pending').length;
+    const totalBalance = await Balance.find().then(entries => 
+      entries.reduce((sum, entry) => sum + entry.amount, 0)
+    );
     console.log(`Updated payment status for loan ${id}, payment ${paymentIndex}: ${normalizedStatus}`);
     res.json({
       msg: `Payment status updated to ${normalizedStatus}`,
       loan,
       paidEMIs,
       pendingEMIs,
+      totalBalance
     });
   } catch (err) {
     console.error('Update Payment Status Error:', err.stack);
