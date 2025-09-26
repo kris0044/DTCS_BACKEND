@@ -9,7 +9,7 @@ connectDB();
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use('/uploads', express.static(path.join(__dirname, 'Uploads')));
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/payments', require('./routes/payments'));
 app.use('/api/loans', require('./routes/loans'));
