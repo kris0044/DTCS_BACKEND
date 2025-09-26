@@ -21,5 +21,5 @@ app.use('/api', require('./routes/dashboard'));
 app.use('/api/balances', require('./routes/balances'));
 app.use('/api/resignations', require('./routes/resignation')); // Ensure path is correct
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
