@@ -9,6 +9,6 @@ router.put('/:id', protect, adminOnly, updateLoan);
 router.delete('/:id', protect, adminOnly, deleteLoan);
 router.get('/', protect, getLoans);
 router.get('/:id', protect, getLoanDetails);
-router.put('/:id/payments/:paymentIndex', protect, adminOnly, updatePaymentStatus);
+router.put('/:id/payments/:paymentIndex', protect, updatePaymentStatus);
 
 module.exports = router;

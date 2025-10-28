@@ -1,4 +1,5 @@
 const Payment = require('../models/Payment');
+const Balance = require('../models/BalanceEntry');
 const { getCurrentAmountInternal } = require('./amountController');
 
 // Make payment (staff only)
@@ -22,8 +23,26 @@ exports.makePayment = async (req, res) => {
     }
     const payment = new Payment({ user: req.user.id, amount, month });
     await payment.save();
+
+    // Add payment amount to balance
+    const balanceEntry = new Balance({
+      amount: amount,
+      note: `Payment recorded for user ${req.user.id} for ${month} (Payment ID: ${payment._id})`
+    });
+    await balanceEntry.save();
+    console.log('Balance updated for payment:', balanceEntry);
+
+    // Calculate total balance
+    const totalBalance = await Balance.find().then(entries => 
+      entries.reduce((sum, entry) => sum + entry.amount, 0)
+    );
+
     console.log('Payment recorded:', payment);
-    res.json({ msg: 'Payment recorded', payment });
+    res.json({ 
+      msg: 'Payment recorded', 
+      payment, 
+      totalBalance: Number(totalBalance.toFixed(2)) 
+    });
   } catch (err) {
     console.error('Make Payment Error:', err.stack);
     res.status(500).json({ msg: 'Server error', error: err.message });
@@ -76,11 +95,33 @@ exports.updatePayment = async (req, res) => {
     if (!payment) {
       return res.status(404).json({ msg: 'Payment not found' });
     }
+    const oldAmount = payment.amount;
     payment.amount = amount;
     payment.month = month;
     await payment.save();
+
+    // Update balance if amount has changed
+    if (oldAmount !== amount) {
+      const balanceAdjustment = amount - oldAmount;
+      const balanceEntry = new Balance({
+        amount: balanceAdjustment,
+        note: `Payment update adjustment for Payment ID: ${payment._id} (user: ${payment.user}, month: ${month})`
+      });
+      await balanceEntry.save();
+      console.log('Balance adjusted for payment update:', balanceEntry);
+    }
+
+    // Calculate total balance
+    const totalBalance = await Balance.find().then(entries => 
+      entries.reduce((sum, entry) => sum + entry.amount, 0)
+    );
+
     console.log('Updated payment:', payment);
-    res.json({ msg: 'Payment updated', payment });
+    res.json({ 
+      msg: 'Payment updated', 
+      payment, 
+      totalBalance: Number(totalBalance.toFixed(2)) 
+    });
   } catch (err) {
     console.error('Update Payment Error:', err.stack);
     res.status(500).json({ msg: 'Server error', error: err.message });
@@ -102,9 +143,26 @@ exports.deletePayment = async (req, res) => {
     if (!payment) {
       return res.status(404).json({ msg: 'Payment not found' });
     }
+    // Deduct payment amount from balance
+    const balanceEntry = new Balance({
+      amount: -payment.amount,
+      note: `Payment deleted for Payment ID: ${payment._id} (user: ${payment.user}, month: ${payment.month})`
+    });
+    await balanceEntry.save();
+    console.log('Balance adjusted for payment deletion:', balanceEntry);
+
     await payment.deleteOne();
+
+    // Calculate total balance
+    const totalBalance = await Balance.find().then(entries => 
+      entries.reduce((sum, entry) => sum + entry.amount, 0)
+    );
+
     console.log('Deleted payment:', payment);
-    res.json({ msg: 'Payment deleted' });
+    res.json({ 
+      msg: 'Payment deleted', 
+      totalBalance: Number(totalBalance.toFixed(2)) 
+    });
   } catch (err) {
     console.error('Delete Payment Error:', err.stack);
     res.status(500).json({ msg: 'Server error', error: err.message });
